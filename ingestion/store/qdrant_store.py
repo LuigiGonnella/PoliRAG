@@ -30,7 +30,7 @@ def store_qdrant(chunks_with_metadata):
                 id = uuid.uuid4(),
                 vector = embedding,
                 payload = {
-                    "index" = chunk["index"],
+                    "index" : chunk["index"],
                     "text": chunk["text"],
                     'source': chunk["source"]
                 }
