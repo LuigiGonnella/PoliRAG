@@ -1,1 +1,0 @@
-﻿"""Document layout parser."""

@@ -3,7 +3,7 @@ from docx import Document
 from pathlib import Path
 from typing import List
 import os
-
+from cleaners.text_cleaner import clean_text
 from chunking.chunk_manager import line_text_splitter
 
 CHUNK_SIZE = 500
@@ -21,19 +21,10 @@ def get_docx_file(path):
     return text, filename
     
 
-def chunk_docx(path, out_dir):
+def chunk_docx(path):
     try:
         text, filename = get_docx_file(path)
-        basename = os.path.splitext(filename)[0] # leave .XXX out
-
-        #Create or read folder path
-        out_dir = Path(out_dir) 
-        out_dir.mkdir(exist_ok=True)
-
-        chunks_dir = Path(out_dir / basename)
-        chunks_dir.mkdir(exist_ok=True)
-
-        chunks = line_text_splitter(text, CHUNK_SIZE)
+        chunks = line_text_splitter(clean_text(text), CHUNK_SIZE)
 
     except Exception as e:
         print(f"Error encountered: {str(e)}")
