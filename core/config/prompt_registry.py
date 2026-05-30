@@ -1,1 +1,0 @@
-﻿"""Registry for prompt templates."""

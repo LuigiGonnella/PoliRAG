@@ -1,1 +1,0 @@
-﻿"""Instructor embedding model wrapper."""

@@ -1,1 +1,0 @@
-﻿"""BGE embedding model wrapper."""
