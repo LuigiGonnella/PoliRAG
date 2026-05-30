@@ -1,0 +1,3 @@
+- tiny LLM as a judge (evaluator) for query transform
+- tiny LLM as a judge (evaluator) to understand if the question is a direct follow-up to the current cache --> BYPASS SEMANTIC SEARCH
+- isolate python execution in docker sandbox (micro-container)

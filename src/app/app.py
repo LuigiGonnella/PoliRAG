@@ -1,17 +1,14 @@
 import os
-import requests
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from qdrant_client import QdrantClient
-from qdrant_client import models
-from openai import OpenAI
-from retrieval.retrieval_pipeline import RetrievalPipeline
-from reranking.reranker_pipeline import RerankerPipeline
+from langchain_core.messages import HumanMessage, AIMessage
+from src.rag.agent.orchestrator import PolyRAGAgent
+from src.rag.agent.llm_config import LLMconfig
 
-app = FastAPI(title="PoliRAG Agent API")
+app = FastAPI(title="PoliRAG Agent")
 
-# Enable CORS to connect frontend to backend
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -20,102 +17,51 @@ app.add_middleware(
     allow_headers=["*"]
 )
 
-# ---------------------------------------------------------------------------
-# INITIALIZE CLOUD APIS & CONFIGURATIONS
-# ---------------------------------------------------------------------------
-QDRANT_URL = os.environ.get("QDRANT_URL")
-QDRANT_API_KEY = os.environ.get("QDRANT_API_KEY")
-COLLECTION_NAME = "uni_docs"
+qdrant_client = QdrantClient(url=os.environ.get("QDRANT_URL"), api_key=os.environ.get("QDRANT_API_KEY"))
 
-HF_API_TOKEN = os.environ.get("HF_API_TOKEN")
+llm_config = LLMconfig()
 
-# OPENROUTER
-LLM_API_KEY = os.environ.get("LLM_API_KEY")
-LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "https://openrouter.ai/api/v1")
-LLM_MODEL = os.environ.get("LLM_MODEL", "deepseek/deepseek-v4-pro")
-
-# Instantiate Clients
-qdrant_client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
-llm_client = OpenAI(api_key=LLM_API_KEY, base_url=LLM_BASE_URL)
-
-# Instantiate pipelines globally so they don't reload models on every request
-retrieval_pipe = RetrievalPipeline(qdrant_client, COLLECTION_NAME, HF_API_TOKEN)
-reranker_pipe = RerankerPipeline()
+agent_system = PolyRAGAgent(
+    qdrant_client=qdrant_client,
+    collection_name="uni_docs",
+    hf_token=os.environ.get("HF_API_TOKEN"),
+    llm_config=llm_config
+)
 
 # ---------------------------------------------------------------------------
-# DATA SCHEMAS
+# UPDATED DATA SCHEMAS FOR MULTI-TURN PERSISTENCE
 # ---------------------------------------------------------------------------
-class ChatRequest(BaseModel):
-    message: str
-    course_filter: str = None       # Optional: e.g., "Chimica"
-    degree_filter: str = None       # Optional: e.g., "Triennale"
+class AgentChatPayload(BaseModel):
+    thread_id: str                  # Core session identifier key for checkpoint lookups
+    message: str                     # Only the latest raw string prompt needed
+    course_filter: str = None
+    degree_filter: str = None
 
-# ---------------------------------------------------------------------------
-# CHAT ENDPOINT (READ ONLY)
-# ---------------------------------------------------------------------------
-@app.post("/chat")
-async def chat_with_agent(request: ChatRequest):
+@app.post("/v1/agent/chat")
+async def execute_agent_loop(payload: AgentChatPayload):
     try:
-        # STAGE 1: Extract Top-K broad search candidates via Hybrid Search
-        candidates = retrieval_pipe.run(
-            query=request.message,
-            top_k=20,  # Retrieve a broad set of candidates first
-            course_filter=request.course_filter,
-            degree_filter=request.degree_filter
-        )
+        # Pass the unique thread session inside your LangGraph configuration dictionary
+        config = {"configurable": {"thread_id": payload.thread_id}}
         
-        # STAGE 2: Deep Context Re-ranking down to Top-L high-quality chunks
-        final_chunks = reranker_pipe.run(
-            query=request.message,
-            candidates=candidates,
-            top_l=5    # Keep only the top 5 most relevant chunks for the LLM
-        )
-
-        # Build context blocks and construct citations array simultaneously
-        context_blocks = []
-        citations = []
-        
-        for hit in final_chunks:
-            payload = hit.payload
-            context_blocks.append(payload.get("text", ""))
-            
-            # Extract file path string safely across OS differences
-            source_path = payload.get("source", "Unknown")
-            filename = source_path.replace("\\", "/").split("/")[-1]
-            
-            citation_info = {
-                "source": filename,
-                "page": payload.get("index", "Unknown"),
-                "course": payload.get("course", "Unknown")
-            }
-            
-            # Prevent adding duplicate citations if multiple chunks originate from the same page
-            if citation_info not in citations:
-                citations.append(citation_info)
-
-        context_str = "\n\n---\n\n".join(context_blocks)
-
-        # Execute LLM prompt with context injection
-        system_prompt = (
-            "You are an expert university study assistant. Answer the user's questions accurately "
-            "based strictly on the provided context extracted from their course notes.\n\n"
-            f"=== CONTEXT FROM UNIVERSITY NOTES ===\n{context_str}\n========================="
-        )
-
-        response = llm_client.chat.completions.create(
-            model=LLM_MODEL,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": request.message}
-            ],
-            temperature=0.3  # Lower temperature ensures stricter adherence to context
-        )
-
-        # Return response alongside clean, structured references
-        return {
-            "answer": response.choices[0].message.content,
-            "citations": citations
+        # Build the initial inputs
+        initial_input = {
+            "messages": [HumanMessage(content=payload.message)],
+            "course_filter": payload.course_filter,
+            "degree_filter": payload.degree_filter
         }
-
+        
+        # Fire graph execution. LangGraph automatically fetches past STM/LTM for this thread_id
+        output_state = agent_system.agent_app.invoke(initial_input, config=config)
+        
+        # Get the latest message generated by the LLM inside the graph execution loop
+        final_answer = output_state["messages"][-1].content
+        
+        return {
+            "answer": final_answer,
+            "citations": output_state.get("citations", []),
+            "ltm_summary_status": "Active" if output_state.get("ltm_summary") else "None",
+            "query_used": output_state.get("transformed_query", payload.message)
+        }
+        
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
