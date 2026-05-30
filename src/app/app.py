@@ -6,6 +6,8 @@ from qdrant_client import QdrantClient
 from langchain_core.messages import HumanMessage, AIMessage
 from src.rag.agent.orchestrator import PolyRAGAgent
 from src.rag.agent.llm_config import LLMconfig
+from dotenv import load_dotenv
+load_dotenv()
 
 app = FastAPI(title="PoliRAG Agent")
 

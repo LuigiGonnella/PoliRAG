@@ -1,0 +1,9 @@
+[tool.uv]
+extra-index-url = ["https://download.pytorch.org/whl/cu128"]
+
+[project]
+dependencies = [
+    "torch",
+    "torchvision",
+    "torchaudio"
+]
