@@ -102,21 +102,38 @@ def line_text_splitter(text: str, chunk_size: int = 1000, overlap: int = 100) ->
         chunks.append("\n".join(current_chunk))
 
     return chunks
-
 def Treesitter_splitter(code: str, language: str, source=None):
     """
     Splits source code into logical, structural syntax blocks using Tree-Sitter.
-    Safe against multi-byte characters and includes a recursive fallback for flat scripts.
+    Completely version-agnostic across py-tree-sitter property/method upgrades.
     """
     from tree_sitter_language_pack import get_parser
     parser = get_parser(language)
     
-    code_bytes = code.encode('utf-8')
-    tree = parser.parse(code_bytes)
+    try:
+        tree = parser.parse(code)
+    except TypeError:
+        tree = parser.parse(code.encode('utf-8'))
 
     chunks = []
 
+    # FIX: Resolve root node dynamically whether it's a property or a method
+    if hasattr(tree, "root_node"):
+        root = tree.root_node() if callable(tree.root_node) else tree.root_node
+    else:
+        return RecursiveSplitter(code, chunksize=1000, source=source)
+
     def visit(node):
+        # Guardrail: protect against nulls or raw methods bleeding into the tree traversal
+        if node is None or callable(node):
+            return
+
+        # FIX: Resolve type dynamically whether it's a property or a method
+        try:
+            node_type = node.type() if callable(node.type) else node.type
+        except AttributeError:
+            return
+
         interesting = {
             "function_definition",
             "method_definition",
@@ -125,21 +142,38 @@ def Treesitter_splitter(code: str, language: str, source=None):
             "class_declaration",
         }
 
-        if node.type in interesting:
-            # FIX: Slice using byte coordinates, then decode back safely to a Python string
-            chunk = code_bytes[node.start_byte:node.end_byte].decode('utf-8', errors='ignore')
+        if node_type in interesting:
+            # Resolve text content cleanly
+            if hasattr(node, "text"):
+                chunk = node.text() if callable(node.text) else node.text
+                if isinstance(chunk, bytes):
+                    chunk = chunk.decode('utf-8', errors='ignore')
+            else:
+                try:
+                    start_byte = node.start_byte() if callable(node.start_byte) else node.start_byte
+                    end_byte = node.end_byte() if callable(node.end_byte) else node.end_byte
+                    chunk = code[start_byte:end_byte]
+                except Exception:
+                    chunk = str(node)
+
             chunks.append({
                 "text": chunk,
                 "index": len(chunks) + 1,
                 "source": source
             })
 
-        for child in node.children:
-            visit(child)
+        # FIX: Resolve children iteration dynamically whether it's a property or a method
+        try:
+            children = node.children() if callable(node.children) else node.children
+            if children:
+                for child in children:
+                    visit(child)
+        except Exception:
+            pass
 
-    visit(tree.root_node)
+    visit(root)
 
-    # GUARDRAIL: Fallback for scripts without formal functions/classes (e.g., casual scratchpads)
+    # Fallback for code files or flat scripts without formal class/function definitions
     if not chunks and code.strip():
         return RecursiveSplitter(code, chunksize=1000, source=source)
 

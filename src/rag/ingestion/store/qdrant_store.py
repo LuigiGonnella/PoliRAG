@@ -3,30 +3,34 @@ import uuid
 from qdrant_client import QdrantClient
 from qdrant_client import models
 from utils.utils import extract_path_metadata
+from pathlib import Path
 
 
 RAW_DIR = os.environ.get("DATA_DIR", "D:/PersonalStudy/projects/PoliRAG/data/raw")
 VECTOR_SIZE = 384  # Matches BAAI/bge-small-en-v1.5 specifications
 
-def initialize_collection(client: QdrantClient, collection_name: str):
-    """Checks and establishes index rules once per runtime session."""
-    if not client.collection_exists(collection_name):
-        print(f"Creating hybrid collection '{collection_name}' on Qdrant Cloud...")
-        client.create_collection(
+def initialize_collection(qdrant_client, collection_name):
+    # Check if collection exists first to prevent overwriting
+    if not qdrant_client.collection_exists(collection_name):
+        qdrant_client.create_collection(
             collection_name=collection_name,
-            vectors_config={
-                "dense": models.VectorParams(size=VECTOR_SIZE, distance=models.Distance.COSINE)
-            },
+            vectors_config=models.VectorParams(
+                size=384,  # Matching bge-small-en-v1.5 dimensions
+                distance=models.Distance.COSINE,
+                # ==========================================
+                # COMPRESSION ACTIVATION: 4x Memory Drop
+                # ==========================================
+                quantization_config=models.ScalarQuantization(
+                    scalar=models.ScalarQuantizationConfig(
+                        type=models.ScalarType.INT8,
+                        always_ram=True
+                    )
+                )
+            ),
             sparse_vectors_config={
-                "sparse": models.SparseVectorParams(modifier=models.Modifier.IDF)
+                "bm25": models.SparseVectorParams()
             }
         )
-        for field in ["source", "course", "degree_level"]:
-            client.create_payload_index(
-                collection_name=collection_name, 
-                field_name=field, 
-                field_schema=models.PayloadSchemaType.KEYWORD
-            )
 
 def bulk_store_qdrant(chunks_with_metadata, qdrant_client, collection_name, embedding_model, sparse_model):
     """Processes embeddings using warm pre-loaded hardware instances."""
@@ -48,7 +52,8 @@ def bulk_store_qdrant(chunks_with_metadata, qdrant_client, collection_name, embe
         points = []
         for idx, chunk in enumerate(chunks_with_metadata):
             path_meta = extract_path_metadata(chunk["source"], RAW_DIR)
-            unique_string = f"{chunk['source']}_{chunk['index']}"
+            normalized_source = str(Path(chunk["source"]).as_posix())
+            unique_string = f"{normalized_source}_{chunk['index']}"
             deterministic_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, unique_string))
             
             s_vec = sparse_embeddings[idx]

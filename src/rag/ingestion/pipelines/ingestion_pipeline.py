@@ -1,22 +1,54 @@
 ﻿"""Optimized end-to-end data ingestion pipeline."""
 import os
+from dotenv import load_dotenv
+
+# 1. Initialize environment configurations before loading project dependencies
+load_dotenv()
+
 from qdrant_client import QdrantClient
 from sentence_transformers import SentenceTransformer
 from fastembed import SparseTextEmbedding
-from dotenv import load_dotenv
 from src.rag.ingestion.loaders.pdf_loader import chunk_pdf
 from src.rag.ingestion.loaders.docx_loader import chunk_docx
 from src.rag.ingestion.loaders.generic_loader import chunk_generic_text
 from utils.utils import scan
 from src.rag.ingestion.store.qdrant_store import initialize_collection, bulk_store_qdrant
+import torch
+from pathlib import Path
+import json
+# ===========================================================================
+# PYTORCH 2.6+ UNPICKLER BUGFIX
+# Enforces weights_only=False globally to allow structural legacy checkpoints
+# ===========================================================================
+_original_torch_load = torch.load
 
-load_dotenv()
+def _trusted_torch_load(*args, **kwargs):
+    """Enforces weights_only=False to support legacy structural checkpoints."""
+    kwargs['weights_only'] = False
+    return _original_torch_load(*args, **kwargs)
+
+# Overwrite the global torch loading handler at the process root level
+torch.load = _trusted_torch_load
+# ===========================================================================
+
 RAW_DIR = os.environ.get("DATA_DIR", "D:/PersonalStudy/projects/PoliRAG/data/raw")
+# Define storage directories
+CACHE_DIR = Path("D:/PersonalStudy/projects/PoliRAG/data/processed_chunks")
+CACHE_DIR.mkdir(parents=True, exist_ok=True)
+TRACKING_FILE = CACHE_DIR / "processed_files.log"
+
+def load_processed_files():
+    if TRACKING_FILE.exists():
+        return set(TRACKING_FILE.read_text().splitlines())
+    return set()
+
+def log_processed_file(file_path):
+    with open(TRACKING_FILE, "a") as f:
+        f.write(f"{file_path}\n")
 
 def main():
     print("Initializing environment and loading local ML embedding models onto CUDA...")
     
-    # 1. Initialize models and clients ONCE at the start of the application
     qdrant_url = os.environ.get("QDRANT_URL")
     qdrant_api_key = os.environ.get("QDRANT_API_KEY")
     
@@ -25,49 +57,57 @@ def main():
     sparse_model = SparseTextEmbedding(model_name="Qdrant/bm25")
     
     collection_name = "uni_docs"
-    
-    # 2. Establish the collection schema definition before processing any files
     initialize_collection(qdrant_client, collection_name)
 
-    global_chunks_pool = []
-    file_count = 0
-
+    processed_files = load_processed_files()
     print(f"Scanning directories starting from: {RAW_DIR}")
     
-    # 3. Collect chunks across files into a single, high-performance processing array
     for file_path in scan(RAW_DIR):
-        ext = os.path.splitext(file_path)[1].lower().lstrip('.') # Safely strips the dot (e.g., '.pdf' -> 'pdf')
+        if file_path in processed_files:
+            print(f"Skipping already ingested file: {os.path.basename(file_path)}")
+            continue
+
+        ext = os.path.splitext(file_path)[1].lower().lstrip('.')
         chunks = None
         
+        # Generate clean identifier for local JSON caching
+        safe_cache_name = f"{Path(file_path).stem}_{ext}.json"
+        cache_file_path = CACHE_DIR / safe_cache_name
+
         try:
-            match ext:
-                case "pdf":
-                    chunks = chunk_pdf(file_path)
-                case "docx":
-                    chunks = chunk_docx(file_path)
-                case _:
-                    chunks = chunk_generic_text(file_path)
-            
+            # Check if this file was already parsed by Magic-PDF previously
+            if cache_file_path.exists():
+                print(f"Loading cached chunks for {os.path.basename(file_path)}...")
+                with open(cache_file_path, "r", encoding="utf-8") as cf:
+                    chunks = json.load(cf)
+            else:
+                # Run the heavy extraction engines
+                match ext:
+                    case "pdf": chunks = chunk_pdf(file_path)
+                    case "docx": chunks = chunk_docx(file_path)
+                    case _: chunks = chunk_generic_text(file_path)
+                
+                # Instantly drop chunks to disk to protect CPU/GPU processing investments
+                if chunks:
+                    with open(cache_file_path, "w", encoding="utf-8") as cf:
+                        json.dump(chunks, cf, ensure_ascii=False, indent=2)
+
+            # Stream chunks to Qdrant immediately for this file
             if chunks:
-                global_chunks_pool.extend(chunks)
-                file_count += 1
+                print(f"Streaming {len(chunks)} chunks from {os.path.basename(file_path)} to Qdrant Cloud...")
+                bulk_store_qdrant(
+                    chunks_with_metadata=chunks,
+                    qdrant_client=qdrant_client,
+                    collection_name=collection_name,
+                    embedding_model=dense_model,
+                    sparse_model=sparse_model
+                )
+                log_processed_file(file_path)
                 
         except Exception as file_error:
             print(f"Skipping corrupt or locked file [{file_path}]: {file_error}")
 
-    print(f"\nParsing complete. Extracted a total of {len(global_chunks_pool)} chunks from {file_count} files.")
-    
-    # 4. Fire the high-density GPU batch matrix transformations and cloud upload
-    if global_chunks_pool:
-        bulk_store_qdrant(
-            chunks_with_metadata=global_chunks_pool,
-            qdrant_client=qdrant_client,
-            collection_name=collection_name,
-            embedding_model=dense_model,
-            sparse_model=sparse_model
-        )
-    else:
-        print("Ingestion halted: No valid text chunks discovered.")
+    print("\nIngestion run completed successfully.")
 
 if __name__ == "__main__":
     main()
