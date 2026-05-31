@@ -33,7 +33,7 @@ def scan(path):
         # Archives and compressed spaces
         ".zip", ".tar", ".gz", ".rar", ".7z", 
         # Media assets and system logs
-        ".log", ".tmp", ".bak", ".png", ".jpg", ".jpeg", ".mp4"
+        ".log", ".tmp", ".bak", ".png", ".jpg", ".jpeg", ".mp4", ".pyc"
     }
 
     try:
@@ -60,7 +60,7 @@ def scan(path):
                     
     except PermissionError:
         print(f"Warning: Permission denied accessing system directory: {path}")
-        
+
 def extract_path_metadata(file_path, base_raw_dir):
     """
     Extractes educational hierarchical metadata layers dynamically 
