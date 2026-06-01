@@ -11,15 +11,90 @@ def scan(path):
     and specified useless/binary file extensions.
     """
     IGNORE_DIR_NAMES = {
-        "venv", 
-        ".venv", 
-        "node_modules", 
-        "__pycache__", 
-        ".git", 
-        ".idea", 
-        ".vscode",
+        # Python
+        "venv",
+        ".venv",
+        ".venv-mac",
+        "__pycache__",
+        ".pytest_cache",
+        ".mypy_cache",
+        ".ruff_cache",
+        ".tox",
+        ".nox",
+        ".ipynb_checkpoints",
+
+        # Node.js
+        "node_modules",
+        ".next",
+        ".nuxt",
+        ".parcel-cache",
+        ".turbo",
+        ".npm",
+
+        # Java
+        ".gradle",
+
+        # C/C++
         "build",
-        "dist"
+        "cmake-build-debug",
+        "cmake-build-release",
+        "CMakeFiles",
+
+        # Rust
+        "target",
+
+        # Go
+        "vendor",
+
+        # IDEs
+        ".idea",
+        ".vscode",
+        ".vs",
+
+        # Version control
+        ".git",
+        ".svn",
+        ".hg",
+
+        # OS files
+        ".Trash",
+        ".Spotlight-V100",
+
+        # Documentation generators
+        "_build",
+        "site",
+        "public",
+        "docs/_build",
+
+        # ML / Data Science
+        "wandb",
+        "mlruns",
+        "lightning_logs",
+        "tensorboard_logs",
+        "runs",
+
+        # Temporary
+        "tmp",
+        "temp",
+        ".cache",
+        "cache",
+
+        # Distribution
+        "dist",
+        "release",
+        "debug",
+        "out",
+
+        # Package managers
+        ".yarn",
+        ".pnpm-store",
+
+        # Docker
+        ".docker",
+
+        # Misc
+        "coverage",
+        "htmlcov",
     }
     
     IGNORE_FILE_NAMES = {"thumbs.db", "desktop.ini"}
@@ -31,9 +106,41 @@ def scan(path):
         # Executables and system binaries
         ".exe", ".dll", ".so", ".dylib", 
         # Archives and compressed spaces
-        ".zip", ".tar", ".gz", ".rar", ".7z", 
+        ".zip", ".tar", ".gz", ".rar", ".7z", ".vbox", ".vbox-extpack",
         # Media assets and system logs
-        ".log", ".tmp", ".bak", ".png", ".jpg", ".jpeg", ".mp4", ".pyc"
+        ".log", ".tmp", ".bak", ".png", ".jpg", ".jpeg", ".mp4", ".pyc",
+         # Images
+        ".gif",
+        ".bmp",
+        ".webp",
+        ".svg",
+
+        # Videos
+        ".avi",
+        ".mov",
+        ".mkv",
+        ".webm",
+
+        # Audio
+        ".mp3",
+        ".wav",
+        ".flac",
+
+        # Large binaries
+        ".obj",
+        ".o",
+        ".a",
+        ".lib",
+
+        # ML checkpoints
+        ".pt",
+        ".pth",
+        ".ckpt",
+        ".h5",
+        ".pkl",
+        ".joblib",
+        ".db",
+        ".ini"
     }
 
     try:

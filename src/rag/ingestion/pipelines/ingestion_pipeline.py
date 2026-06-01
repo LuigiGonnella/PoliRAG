@@ -31,7 +31,7 @@ def _trusted_torch_load(*args, **kwargs):
 torch.load = _trusted_torch_load
 # ===========================================================================
 
-RAW_DIR = os.environ.get("DATA_DIR", "D:/PersonalStudy/projects/PoliRAG/data/raw")
+RAW_DIR = os.environ.get("DATA_DIR", "C:/Users/Utente/OneDrive - Politecnico di Torino/Universita")
 # Define storage directories
 CACHE_DIR = Path("D:/PersonalStudy/projects/PoliRAG/data/processed_chunks")
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -95,14 +95,19 @@ def main():
             # Stream chunks to Qdrant immediately for this file
             if chunks:
                 print(f"Streaming {len(chunks)} chunks from {os.path.basename(file_path)} to Qdrant Cloud...")
-                bulk_store_qdrant(
+                was_stored_successfully = bulk_store_qdrant(
                     chunks_with_metadata=chunks,
                     qdrant_client=qdrant_client,
                     collection_name=collection_name,
                     embedding_model=dense_model,
                     sparse_model=sparse_model
                 )
-                log_processed_file(file_path)
+                
+                # TRANSACTIONAL GUARD: Only log to success file if no internal failures occurred
+                if was_stored_successfully:
+                    log_processed_file(file_path)
+                else:
+                    print(f"ERROR: Ingestion tracking skipped for [{os.path.basename(file_path)}] due to upload errors.")
                 
         except Exception as file_error:
             print(f"Skipping corrupt or locked file [{file_path}]: {file_error}")
