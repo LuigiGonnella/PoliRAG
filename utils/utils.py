@@ -95,16 +95,18 @@ def scan(path):
         # Misc
         "coverage",
         "htmlcov",
+        "data",
+        "raw"
     }
     
-    IGNORE_FILE_NAMES = {"thumbs.db", "desktop.ini"}
+    IGNORE_FILE_NAMES = {"thumbs.db", "desktop.ini", "qa-webpage-mockup", "train-images-idx3-ubyte"}
 
     # Set of extensions to completely skip (must include the leading dot)
     IGNORE_EXTENSIONS = {
         # Machine Learning weights & checkpoints
         ".pth", ".pt", ".ckpt", ".safetensors", ".bin", ".onnx", 
         # Executables and system binaries
-        ".exe", ".dll", ".so", ".dylib", 
+        ".exe", ".dll", ".so", ".dylib", ".csv"
         # Archives and compressed spaces
         ".zip", ".tar", ".gz", ".rar", ".7z", ".vbox", ".vbox-extpack",
         # Media assets and system logs
