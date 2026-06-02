@@ -96,7 +96,7 @@ def migrate_metadata():
         if operations:
             client.batch_update_points(
                 collection_name=collection_name,
-                operations=operations,
+                update_operations=operations,
                 wait=True
             )
             total_updated += len(operations)
