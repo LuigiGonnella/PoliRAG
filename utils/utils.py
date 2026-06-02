@@ -38,7 +38,7 @@ def scan(path):
         "build",
         "cmake-build-debug",
         "cmake-build-release",
-        "CMakeFiles",
+        "cmakefiles",
 
         # Rust
         "target",
@@ -57,8 +57,8 @@ def scan(path):
         ".hg",
 
         # OS files
-        ".Trash",
-        ".Spotlight-V100",
+        ".trash",
+        ".spotlight-v100",
 
         # Documentation generators
         "_build",
@@ -96,17 +96,19 @@ def scan(path):
         "coverage",
         "htmlcov",
         "data",
-        "raw"
+        "raw",
+        "__macosx",
+        "esercizi e lab"
     }
     
-    IGNORE_FILE_NAMES = {"thumbs.db", "desktop.ini", "qa-webpage-mockup", "train-images-idx3-ubyte"}
+    IGNORE_FILE_NAMES = {"thumbs.db", "desktop.ini", "qa-webpage-mockup.pdf", "train-images-idx3-ubyte", "licenses.chromium.html", "package.json", "package-lock.json"}
 
     # Set of extensions to completely skip (must include the leading dot)
     IGNORE_EXTENSIONS = {
         # Machine Learning weights & checkpoints
         ".pth", ".pt", ".ckpt", ".safetensors", ".bin", ".onnx", 
         # Executables and system binaries
-        ".exe", ".dll", ".so", ".dylib", ".csv"
+        ".exe", ".dll", ".so", ".dylib", ".csv",
         # Archives and compressed spaces
         ".zip", ".tar", ".gz", ".rar", ".7z", ".vbox", ".vbox-extpack",
         # Media assets and system logs
@@ -142,7 +144,10 @@ def scan(path):
         ".pkl",
         ".joblib",
         ".db",
-        ".ini"
+        ".ini",
+        ".dat",
+        ".pak",
+        ".ppt"
     }
 
     try:

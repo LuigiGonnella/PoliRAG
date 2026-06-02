@@ -11,7 +11,7 @@ RAW_DIR = os.environ.get("DATA_DIR", "C:/Users/Utente/OneDrive - Politecnico di 
 VECTOR_SIZE = 384  # Matches BAAI/bge-small-en-v1.5 specifications
 
 def initialize_collection(qdrant_client, collection_name):
-    """Establishes named schemas and quantization models in the vector space."""
+    """Establishes memory-optimized collections using on-disk storage mappings."""
     if not qdrant_client.collection_exists(collection_name):
         qdrant_client.create_collection(
             collection_name=collection_name,
@@ -19,17 +19,31 @@ def initialize_collection(qdrant_client, collection_name):
                 "dense": models.VectorParams(
                     size=VECTOR_SIZE,
                     distance=models.Distance.COSINE,
+                    # =======================================================
+                    # RAM OPTIMIZATION: Stream vectors directly from Disk
+                    # =======================================================
+                    on_disk=True,  
                     quantization_config=models.ScalarQuantization(
                         scalar=models.ScalarQuantizationConfig(
                             type=models.ScalarType.INT8,
-                            always_ram=True
+                            always_ram=False  # Reclaims RAM by dropping memory caching
                         )
                     )
                 )
             },
             sparse_vectors_config={
-                "sparse": models.SparseVectorParams()
-            }
+                "sparse": models.SparseVectorParams(
+                    # =======================================================
+                    # RAM OPTIMIZATION: Map sparse inverted index to Disk
+                    # =======================================================
+                    index=models.SparseIndexParams(
+                        on_disk=True  # Corrected Class parameter for Sparse On-Disk
+                    )
+                )
+            },
+            hnsw_config=models.HnswConfigDiff(
+                on_disk=True  # Forces the HNSW structural graph vectors to live on disk
+            )
         )
 
 def bulk_store_qdrant(chunks_with_metadata, qdrant_client, collection_name, embedding_model, sparse_model):

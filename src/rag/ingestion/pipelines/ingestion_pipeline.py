@@ -4,7 +4,8 @@ from dotenv import load_dotenv
 
 # 1. Initialize environment configurations before loading project dependencies
 load_dotenv()
-
+from src.rag.ingestion.loaders.ipynb_loader import chunk_ipynb
+from src.rag.ingestion.loaders.pptx_loader import chunk_pptx  
 from qdrant_client import QdrantClient
 from sentence_transformers import SentenceTransformer
 from fastembed import SparseTextEmbedding
@@ -35,7 +36,11 @@ RAW_DIR = os.environ.get("DATA_DIR", "C:/Users/Utente/OneDrive - Politecnico di 
 # Define storage directories
 CACHE_DIR = Path("D:/PersonalStudy/projects/PoliRAG/data/processed_chunks")
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
-TRACKING_FILE = CACHE_DIR / "processed_files.log"
+
+LOG_DIR = Path("D:/PersonalStudy/projects/PoliRAG/data/logs")
+LOG_DIR.mkdir(parents=True, exist_ok=True)
+
+TRACKING_FILE = LOG_DIR / "processed_files.log"
 
 def load_processed_files():
     if TRACKING_FILE.exists():
@@ -85,6 +90,8 @@ def main():
                 match ext:
                     case "pdf": chunks = chunk_pdf(file_path)
                     case "docx": chunks = chunk_docx(file_path)
+                    case "pptx": chunks = chunk_pptx(file_path)
+                    case "ipynb": chunks = chunk_ipynb(file_path)
                     case _: chunks = chunk_generic_text(file_path)
                 
                 # Instantly drop chunks to disk to protect CPU/GPU processing investments
