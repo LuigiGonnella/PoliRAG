@@ -1,4 +1,13 @@
-- tiny LLM as a judge (evaluator) for query transform
-- tiny LLM as a judge (evaluator) to understand if the question is a direct follow-up to the current cache --> BYPASS SEMANTIC SEARCH
-- isolate python execution in docker sandbox (micro-container)
-- run scripts\fix_store_metadata.py after storing finishes
+- python tool execution in docker sandbox (micro-container)
+- Better markdown
+- Citations solo se score > th
+- far spiegare: streming gen, markdown on the fly
+- input box chat always visible (not only if you scroll until the end)
+- when text gen finishes do not bring down immediately
+-when long response content do not scroll all view, just dynamicly go down
+- safeguard in responses
+
+
+long term:
+- add real docs so from citation --> click --> doc
+- add user + auth + multi replica

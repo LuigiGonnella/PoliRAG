@@ -1,25 +1,25 @@
-﻿from reranking.cross_encoder import LocalCrossEncoder
+from src.rag.reranking.cross_encoder import LocalCrossEncoder
+
 
 class RerankerPipeline:
-    """
-    Given the TOP-K retrieved chunks after hybrid search, performs re-ranking and gets TOP-L final chunks
-    """
+    """Rerank retrieved chunks and attach rerank scores to each returned point."""
+
     def __init__(self):
         self.reranker = LocalCrossEncoder()
 
-    def run(self, query: str, candidates: list, top_l: int = 5) -> list:
+    def run(self, query: str, candidates: list, top_l: int = 10) -> list:
         if not candidates:
             return []
 
-        # 1. Unpack textual payloads
-        documents = [hit.payload.get("text", "") for hit in candidates]
-
-        # 2. Extract Cross-Encoder relevance scores
+        documents = [hit.payload.get("text", "") if hit.payload else "" for hit in candidates]
         scores = self.reranker.compute_scores(query, documents)
-
-        # 3. Zip data, sort elements in descending order
         scored_candidates = list(zip(candidates, scores))
-        scored_candidates.sort(key=lambda x: x[1], reverse=True)
+        scored_candidates.sort(key=lambda item: item[1], reverse=True)
 
-        # 4. Extract Top-L points
-        return [item[0] for item in scored_candidates[:top_l]]
+        reranked = []
+        for candidate, score in scored_candidates[:top_l]:
+            if candidate.payload is None:
+                candidate.payload = {}
+            candidate.payload["rerank_score"] = float(score)
+            reranked.append(candidate)
+        return reranked

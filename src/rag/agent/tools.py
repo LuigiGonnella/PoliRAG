@@ -20,8 +20,11 @@ def external_web_search(query: str) -> str:
             query = query, search_depth = "advanced", max_results = 3
         )
         
-        results = response.json().get("results", [])
-        formatted = [f"[Web Link: {r['url']}]\n{r['content']}" for r in results]
+        results = response.get("results", []) if isinstance(response, dict) else []
+        formatted = [
+            f"[Web Link: {r.get('url', 'unknown')}]\n{r.get('content', '')}"
+            for r in results
+        ]
         return "\n\n---\n\n".join(formatted)
     except Exception as e:
         return f"External lookup connection network error: {str(e)}"

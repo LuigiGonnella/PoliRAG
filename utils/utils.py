@@ -1,9 +1,6 @@
 import os
 from pathlib import Path
 
-import os
-from pathlib import Path
-
 def scan(path):
     """
     Recursively generates absolute file paths within a directory tree.
@@ -177,8 +174,8 @@ def scan(path):
 
 def extract_path_metadata(file_path, base_raw_dir):
     """
-    Extractes educational hierarchical metadata layers dynamically 
-    based on deterministic file path nesting levels.
+    Extract educational metadata from paths shaped as:
+    <degree>/<year>/<optional semester>/<course>/<materials...>
     """
     path_obj = Path(file_path)
     base_obj = Path(base_raw_dir)
@@ -187,10 +184,16 @@ def extract_path_metadata(file_path, base_raw_dir):
         relative_path = path_obj.relative_to(base_obj)
         parts = relative_path.parts
         
-        # Unpack indices if they exist, protecting against loose base root files
         degree_level = parts[0] if len(parts) > 0 else "Unknown"
         year = parts[1] if len(parts) > 1 else "Unknown"         
-        course = parts[2] if len(parts) > 2 else "Unknown"       
+        course = "Unknown"
+
+        if len(parts) > 2:
+            maybe_semester = parts[2].lower()
+            if "semestre" in maybe_semester:
+                course = parts[3] if len(parts) > 3 else "Unknown"
+            else:
+                course = parts[2]
         
         return {
             "degree_level": degree_level,

@@ -1,0 +1,13 @@
+.git
+.venv
+__pycache__
+.pytest_cache
+.mypy_cache
+.env
+data/raw
+data/processed_chunks
+data/logs
+data/app_sessions.sqlite
+models
+docker/qdrant_storage
+node_modules

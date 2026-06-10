@@ -3,3 +3,6 @@ data
 .venv
 __pycache__
 models/
+.pytest_cache
+*.pyc
+docker/qdrant_storage

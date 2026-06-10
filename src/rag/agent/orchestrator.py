@@ -1,64 +1,112 @@
-import os
-import requests
-from typing import Annotated, TypedDict, List
+"""LangGraph orchestration for the PoliRAG agent."""
+from __future__ import annotations
+
+import logging
+from typing import Annotated, List, TypedDict
+
+from langchain_core.messages import HumanMessage, RemoveMessage, SystemMessage
+from langchain_openai import ChatOpenAI
+from langgraph.checkpoint.memory import MemorySaver
+from langgraph.graph import END, StateGraph
+from langgraph.graph.message import add_messages
+from langgraph.prebuilt import ToolNode
 from qdrant_client import QdrantClient
 
-# LangGraph Core Primitives
-from langgraph.graph import StateGraph, START, END
-from langgraph.graph.message import add_messages
-from langgraph.checkpoint.memory import MemorySaver
-from langgraph.prebuilt import ToolNode
-from langchain_core.messages import SystemMessage, HumanMessage, RemoveMessage
-
-from langchain_openai import ChatOpenAI
-from google import genai
-from google.genai import types
-
+from src.rag.agent.llm_config import LLMConfig
+from src.rag.agent.routes import (
+    route_after_agent,
+    route_after_cache,
+    route_after_rewrite,
+    route_after_search,
+)
+from src.rag.agent.tools import calculator, external_web_search, run_python
 from src.rag.query_transform.query_rewriter import QueryRewriter
-from src.rag.retrieval.retrieval_pipeline import RetrievalPipeline
 from src.rag.reranking.reranker_pipeline import RerankerPipeline
-from src.rag.agent.tools import external_web_search, calculator, run_python
+from src.rag.retrieval.retrieval_pipeline import RetrievalPipeline
+
+try:
+    from google import genai
+    from google.genai import types
+except Exception:  # pragma: no cover - optional dependency path
+    genai = None
+    types = None
 
 
-# ---------------------------------------------------------------------------
-# GRAPH STATE SPECIFICATION
-# ---------------------------------------------------------------------------
-class AgentState(TypedDict):
+logger = logging.getLogger(__name__)
+
+
+class AgentState(TypedDict, total=False):
     messages: Annotated[list, add_messages]
     transformed_query: str
     course_filter: str
     degree_filter: str
+    year_filter: str
     retrieved_context: str
     context_cache: List[dict]
     ltm_summary: str
     max_rerank_score: float
     citations: List[dict]
 
-class PolyRAGAgent:
-    def __init__(self, qdrant_client: QdrantClient, collection_name: str, hf_token: str, llm_config: dict):
-        self.hf_token = hf_token
-        self.rewriter = QueryRewriter(llm_config["key"], llm_config["base_url"], llm_config["model"])
-        self.retrieval_pipe = RetrievalPipeline(qdrant_client, collection_name, hf_token)
-        self.reranker_pipe = RerankerPipeline()
-        
-        # Core Orchestration Agent (DeepSeek via OpenRouter)
-        self.llm = ChatOpenAI(api_key=llm_config["key"], base_url=llm_config["base_url"], model=llm_config["model"], temperature=0.1)
-        
-        # Free Cloud Evaluator (Gemini 2.5 Flash Lite)
-        gemini_key = os.environ.get("GEMINI_API_KEY")
-        self.gemini_client = genai.Client(api_key=gemini_key) if gemini_key else None
 
-        # Dynamic Tools Configuration Layer
-        self.dynamic_tools = [external_web_search, calculator, run_python]
+class PolyRAGAgent:
+    def __init__(
+        self,
+        qdrant_client: QdrantClient,
+        collection_name: str,
+        hf_token: str | None,
+        llm_config,
+        *,
+        hf_embedding_model: str = "BAAI/bge-small-en-v1.5",
+        enable_web_fallback: bool = True,
+        enable_python_tool: bool = False,
+        retrieval_top_k: int = 25,
+        rerank_top_l: int = 5,
+        fallback_threshold: float = 0.45,
+    ):
+        self.hf_token = hf_token
+        self.llm_config = LLMConfig.coerce(llm_config)
+        api_key = self.llm_config.require_api_key()
+        self.enable_web_fallback = enable_web_fallback
+        self.retrieval_top_k = retrieval_top_k
+        self.rerank_top_l = rerank_top_l
+        self.fallback_threshold = fallback_threshold
+
+        self.rewriter = QueryRewriter(api_key, self.llm_config.base_url, self.llm_config.model)
+        self.retrieval_pipe = RetrievalPipeline(
+            qdrant_client,
+            collection_name,
+            hf_token,
+            hf_embedding_model=hf_embedding_model,
+        )
+        self.reranker_pipe = RerankerPipeline()
+
+        self.llm = ChatOpenAI(
+            api_key=api_key,
+            base_url=self.llm_config.base_url,
+            model=self.llm_config.model,
+            temperature=0.1,
+        )
+
+        self.gemini_client = None
+        if genai is not None:
+            try:
+                import os
+
+                gemini_key = os.environ.get("GEMINI_API_KEY")
+                self.gemini_client = genai.Client(api_key=gemini_key) if gemini_key else None
+            except Exception as exc:
+                logger.warning("Gemini judge disabled: %s", exc)
+
+        self.dynamic_tools = [external_web_search, calculator]
+        if enable_python_tool:
+            self.dynamic_tools.append(run_python)
         self.model_with_tools = self.llm.bind_tools(self.dynamic_tools)
-        
+
         self.workflow = StateGraph(AgentState)
         self._build_graph()
-    
+
     def _call_gemini_judge(self, system_instruction: str, user_content: str) -> str:
-        """Helper to run low-latency binary classification tasks using Gemini."""
-        if not self.gemini_client:
-            print("Warning: GEMINI_API_KEY is missing. Defaulting evaluation gate to 'NO'.")
+        if not self.gemini_client or types is None:
             return "NO"
         try:
             response = self.gemini_client.models.generate_content(
@@ -67,154 +115,172 @@ class PolyRAGAgent:
                 config=types.GenerateContentConfig(
                     system_instruction=system_instruction,
                     temperature=0.0,
-                    max_output_tokens=5
-                )
+                    max_output_tokens=5,
+                ),
             )
-            return "YES" if "YES" in response.text.upper() else "NO"
-        except Exception as e:
-            print(f"Gemini Judge Exception: {e}. Falling back to 'NO'.")
+            text = getattr(response, "text", "") or ""
+            return "YES" if "YES" in text.upper() else "NO"
+        except Exception as exc:
+            logger.warning("Gemini judge failed: %s", exc)
             return "NO"
 
     def _build_graph(self):
-        
-        # NODE 1: Gemini Context Cache Judge
         def cache_judge_node(state: AgentState):
             if not state.get("context_cache"):
                 return {"max_rerank_score": 0.0}
-            
+
             user_msg = state["messages"][-1].content
-            cache_sources = [c["source"] for c in state["context_cache"]]
-            
+            cache_sources = sorted({c.get("source", "unknown") for c in state["context_cache"]})
             sys_prompt = (
                 "You are a strict validation judge. Determine if the user's incoming statement is a direct follow-up "
                 "or question that can be answered entirely using the files currently cached in memory. "
                 "Respond with EXACTLY 'YES' or 'NO' and absolutely nothing else."
             )
             user_prompt = f"Question: '{user_msg}'\nCached Documents: {cache_sources}"
-            
             decision = self._call_gemini_judge(sys_prompt, user_prompt)
-            
+
             if decision == "YES":
-                # BYPASS SEARCH: Inject cached text block segments straight to state
-                cached_text = "\n\n".join([c["text"] for c in state["context_cache"]])
+                cached_text = "\n\n".join([c.get("text", "") for c in state["context_cache"]])
                 return {
                     "retrieved_context": cached_text,
-                    "max_rerank_score": 1.0, # Sentinel value to signal bypass routing edge
-                    "citations": state["context_cache"]
+                    "max_rerank_score": 1.0,
+                    "citations": state["context_cache"],
                 }
             return {"max_rerank_score": 0.0}
 
-        # NODE 2: Gemini Query Transformation Judge
         def rewrite_judge_node(state: AgentState):
             user_msg = state["messages"][-1].content
-            
-            # If there is no previous chat history, a rewrite is never needed
             if len(state["messages"]) <= 1:
                 return {"transformed_query": user_msg}
-                
+
             sys_prompt = (
                 "You are an information retrieval judge. Determine if the latest user question needs context "
-                "from the chat history to be fully understood as a standalone query (e.g., uses pronouns like 'it', "
-                "'this', 'that', 'his algorithm'). Respond with EXACTLY 'YES' or 'NO'."
+                "from the chat history to be fully understood as a standalone query. Respond with EXACTLY 'YES' or 'NO'."
             )
-            user_prompt = f"Latest Question: '{user_msg}'\nChat History Length: {len(state['messages'])-1} turns."
-            
+            user_prompt = f"Latest Question: '{user_msg}'\nChat History Length: {len(state['messages']) - 1} turns."
             decision = self._call_gemini_judge(sys_prompt, user_prompt)
-            
-            if decision == "YES":
-                return {"transformed_query": "__REWRITE_NEEDED__"} # Routing execution flag
-            return {"transformed_query": user_msg}
+            return {"transformed_query": "__REWRITE_NEEDED__" if decision == "YES" else user_msg}
 
-        # NODE 3: Query Transformation Execution Node
         def rewrite_exec_node(state: AgentState):
             user_msg = state["messages"][-1].content
             history = state["messages"][:-1]
             if state.get("ltm_summary"):
                 history = [SystemMessage(content=f"Prior Summary: {state['ltm_summary']}")] + history
-            
-            rewritten = self.rewriter.run(user_msg, history)
-            return {"transformed_query": rewritten}
+            return {"transformed_query": self.rewriter.run(user_msg, history)}
 
-        # NODE 4: Two-Stage Local Search
         def local_search_node(state: AgentState):
             query = state["transformed_query"]
             candidates = self.retrieval_pipe.run(
-                query, top_k=25, 
-                course_filter=state.get("course_filter"), degree_filter=state.get("degree_filter")
+                query,
+                top_k=self.retrieval_top_k,
+                course_filter=state.get("course_filter"),
+                degree_filter=state.get("degree_filter"),
+                year_filter=state.get("year_filter"),
             )
-            final_chunks = self.reranker_pipe.run(query, candidates, top_l=5)
-            
+            final_chunks = self.reranker_pipe.run(query, candidates, top_l=self.rerank_top_l)
+
             context_blocks, new_cache, max_score = [], [], 0.0
             for hit in final_chunks:
-                text_content = hit.payload.get("text", "")
-                filename = hit.payload.get("source", "").replace("\\", "/").split("/")[-1]
+                payload = hit.payload or {}
+                text_content = payload.get("text", "")
+                source = str(payload.get("source", "unknown")).replace("\\", "/")
+                filename = source.split("/")[-1]
                 context_blocks.append(text_content)
-                
-                current_score = getattr(hit, 'score', 0.0) or hit.payload.get("score", 0.0)
-                if current_score > max_score:
-                    max_score = current_score
-                
-                new_cache.append({
-                    "type": "local", "source": filename, "page": hit.payload.get("index", "Unknown"), "text": text_content
-                })
+
+                current_score = float(payload.get("rerank_score") or getattr(hit, "score", 0.0) or 0.0)
+                max_score = max(max_score, current_score)
+                new_cache.append(
+                    {
+                        "type": "local",
+                        "source": filename,
+                        "page": payload.get("index", "Unknown"),
+                        "text": text_content,
+                        "score": current_score,
+                    }
+                )
+
+            citations_by_source = {}
+            for citation in new_cache:
+                source = citation["source"]
+                existing = citations_by_source.setdefault(
+                    source,
+                    {
+                        "type": "local",
+                        "source": source,
+                        "pages": set(),
+                        "score": 0.0,
+                    },
+                )
+                page = citation["page"]
+                if page not in (None, "", "Unknown"):
+                    existing["pages"].add(str(page))
+                existing["score"] = max(existing["score"], float(citation.get("score") or 0.0))
+
+            citations = []
+            for item in citations_by_source.values():
+                pages = sorted(item.pop("pages"), key=lambda value: (not value.isdigit(), value))
+                item["page"] = ", ".join(pages) if pages else "Unknown"
+                citations.append(item)
 
             return {
                 "retrieved_context": "\n\n---\n\n".join(context_blocks),
                 "max_rerank_score": max_score,
                 "context_cache": new_cache,
-                "citations": [{"type": "local", "source": c["source"], "page": c["page"]} for c in new_cache]
+                "citations": citations,
             }
 
-        # NODE 5: Deterministic Web Fallback Node (Executed automatically if Score < 0.45)
         def web_search_fallback_node(state: AgentState):
+            if not self.enable_web_fallback:
+                return {}
+
             query = state["transformed_query"]
-            # Call tool inline programmatically
-            web_raw_data = external_web_search.invoke(query)
-            
-            web_citations = [{"type": "external", "source": f"Automatic Web Fallback: '{query}'"}]
-            combined_context = f"{state['retrieved_context']}\n\n=== AUTOMATIC WEB FALLBACK CONTEXT ===\n{web_raw_data}"
-            
+            web_raw_data = external_web_search.invoke({"query": query})
+            web_citations = [{"type": "external", "source": f"Automatic web fallback: {query}"}]
+            combined_context = (
+                f"{state.get('retrieved_context', '')}\n\n"
+                f"=== AUTOMATIC WEB FALLBACK CONTEXT ===\n{web_raw_data}"
+            )
             return {
                 "retrieved_context": combined_context,
-                "citations": state["citations"] + web_citations
+                "citations": state.get("citations", []) + web_citations,
             }
 
-        # NODE 6: Dynamic Agent Decision Core Execution
         def agent_think_node(state: AgentState):
             ltm = state.get("ltm_summary", "No prior record summaries available.")
+            context = state.get("retrieved_context") or "No relevant local context was retrieved."
             system_prompt = (
-                "You are an advanced university study assistant agent.\n"
+                "You are an advanced university study assistant for the user's Politecnico study material.\n"
                 f"--- LONG TERM MEMORY SUMMARY ---\n{ltm}\n---------------------------------\n\n"
-                "Review the context material below to answer the user query. "
-                "You have access to dynamic tools (calculator, run_python, external_web_search) "
-                "which you can call if you need to run calculations, test snippets, or research extra details.\n\n"
-                f"=== CURRENT RETRIEVED CONTEXT ===\n{state['retrieved_context']}\n"
+                "Use the retrieved context as the primary source. If the context is insufficient, say what is missing "
+                "instead of inventing citations. You may call tools only when they materially improve the answer.\n\n"
+                f"=== CURRENT RETRIEVED CONTEXT ===\n{context}\n"
             )
             messages = [SystemMessage(content=system_prompt)] + state["messages"]
             response = self.model_with_tools.invoke(messages)
-            
-            # Extract on-the-fly tool invocations for citations arrays
+
             new_citations = list(state.get("citations", []))
-            if hasattr(response, "tool_calls") and response.tool_calls:
-                for call in response.tool_calls:
-                    if call["name"] == "external_web_search":
-                        new_citations.append({
-                            "type": "external", "source": f"Dynamic Tool Call: '{call['args'].get('query')}'"
-                        })
+            for call in getattr(response, "tool_calls", []) or []:
+                if call.get("name") == "external_web_search":
+                    query = call.get("args", {}).get("query", "")
+                    new_citations.append({"type": "external", "source": f"Dynamic tool call: {query}"})
             return {"messages": [response], "citations": new_citations}
 
-        # NODE 7: Long-Term Memory Compactor
         def ltm_management_node(state: AgentState):
             messages = state["messages"]
             if len(messages) < 8:
                 return {}
-            summary_prompt = f"Update this summary: {state.get('ltm_summary', '')}\nWith these messages:\n{messages[-4:]}"
-            response = self.llm.invoke([HumanMessage(content=summary_prompt)])
-            return {"ltm_summary": response.content.strip(), "messages": [RemoveMessage(id=m.id) for m in messages[:-4]]}
 
-        # ---------------------------------------------------------------------------
-        # GRAPH SYSTEM EDGE ROUTING GRAPH
-        # ---------------------------------------------------------------------------
+            messages_to_compress = messages[:-4]
+            summary_prompt = (
+                f"Progressively update this long-term conversation summary: '{state.get('ltm_summary', '')}'\n"
+                f"Incorporate these older dialog turns without losing core technical context:\n{messages_to_compress}"
+            )
+            response = self.llm.invoke([HumanMessage(content=summary_prompt)])
+            return {
+                "ltm_summary": response.content.strip(),
+                "messages": [RemoveMessage(id=m.id) for m in messages_to_compress],
+            }
+
         self.workflow.add_node("cache_judge", cache_judge_node)
         self.workflow.add_node("rewrite_judge", rewrite_judge_node)
         self.workflow.add_node("rewrite_exec", rewrite_exec_node)
@@ -224,37 +290,28 @@ class PolyRAGAgent:
         self.workflow.add_node("execute_tools", ToolNode(self.dynamic_tools))
         self.workflow.add_node("ltm_compile", ltm_management_node)
 
-        # Set Entry Point Flow
         self.workflow.set_entry_point("cache_judge")
-
-        # Edge 1: Cache Judge Conditional Router
         self.workflow.add_conditional_edges(
             "cache_judge",
-            lambda s: "agent_think" if s["max_rerank_score"] >= 1.0 else "rewrite_judge",
-            {"agent_think": "agent_think", "rewrite_judge": "rewrite_judge"}
+            lambda state: route_after_cache(state.get("max_rerank_score", 0.0)),
+            {"agent_think": "agent_think", "rewrite_judge": "rewrite_judge"},
         )
-
-        # Edge 2: Rewrite Judge Conditional Router
         self.workflow.add_conditional_edges(
             "rewrite_judge",
-            lambda s: "rewrite_exec" if s["transformed_query"] == "__REWRITE_NEEDED__" else "local_search",
-            {"rewrite_exec": "rewrite_exec", "local_search": "local_search"}
+            lambda state: route_after_rewrite(state.get("transformed_query", "")),
+            {"rewrite_exec": "rewrite_exec", "local_search": "local_search"},
         )
         self.workflow.add_edge("rewrite_exec", "local_search")
-
-        # Edge 3: Deterministic Low Score Fallback Router
         self.workflow.add_conditional_edges(
             "local_search",
-            lambda s: "web_search_fallback" if s["max_rerank_score"] < 0.45 else "agent_think",
-            {"web_search_fallback": "web_search_fallback", "agent_think": "agent_think"}
+            lambda state: route_after_search(state.get("max_rerank_score", 0.0), self.fallback_threshold),
+            {"web_search_fallback": "web_search_fallback", "agent_think": "agent_think"},
         )
         self.workflow.add_edge("web_search_fallback", "agent_think")
-
-        # Edge 4: Dynamic Tool-Execution Loopback Engine
         self.workflow.add_conditional_edges(
             "agent_think",
-            lambda s: "tools" if (hasattr(s["messages"][-1], "tool_calls") and s["messages"][-1].tool_calls) else "finish",
-            {"tools": "execute_tools", "finish": "ltm_compile"}
+            lambda state: route_after_agent(state["messages"][-1]),
+            {"tools": "execute_tools", "finish": "ltm_compile"},
         )
         self.workflow.add_edge("execute_tools", "agent_think")
         self.workflow.add_edge("ltm_compile", END)
