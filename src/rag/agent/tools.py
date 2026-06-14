@@ -1,7 +1,7 @@
 import os
 import sys
 import io
-from tavily import TavilyClient
+import requests
 from langchain_core.tools import tool
 
 @tool
@@ -15,12 +15,21 @@ def external_web_search(query: str) -> str:
         return "External lookup failure: Tavily API token key missing from environment variables."
         
     try:
-        client = TavilyClient(api_key)
-        response = client.search(
-            query = query, search_depth = "advanced", max_results = 3
+        timeout = float(os.environ.get("POLYRAG_WEB_SEARCH_TIMEOUT_SECONDS", "12"))
+        response = requests.post(
+            "https://api.tavily.com/search",
+            json={
+                "api_key": api_key,
+                "query": query,
+                "search_depth": "advanced",
+                "max_results": 3,
+            },
+            timeout=timeout,
         )
+        response.raise_for_status()
+        payload = response.json()
         
-        results = response.get("results", []) if isinstance(response, dict) else []
+        results = payload.get("results", []) if isinstance(payload, dict) else []
         formatted = [
             f"[Web Link: {r.get('url', 'unknown')}]\n{r.get('content', '')}"
             for r in results

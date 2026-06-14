@@ -21,8 +21,9 @@ class Settings(BaseSettings):
     tavily_api_key: str | None = None
     hf_api_token: str | None = None
     hf_embedding_model: str = "BAAI/bge-small-en-v1.5"
+    fastembed_cache_dir: Path = Path("data/fastembed_cache")
 
-    frontend_dir: Path = Path("frontend")
+    frontend_dir: Path = Path("frontend/dist")
     session_db_path: Path = Path("data/app_sessions.sqlite")
 
     cors_origins: str = (
@@ -33,6 +34,9 @@ class Settings(BaseSettings):
     retrieval_top_k: int = 25
     rerank_top_l: int = 10
     rerank_fallback_threshold: float = 0.45
+    agent_response_timeout_seconds: int = 180
+    llm_request_timeout_seconds: int = 60
+    web_search_timeout_seconds: int = 12
     enable_web_fallback: bool = True
     enable_python_tool: bool = False
     course_catalog_ttl_seconds: int = 300

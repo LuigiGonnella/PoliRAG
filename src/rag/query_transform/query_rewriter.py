@@ -2,12 +2,20 @@
 from langchain_core.prompts import ChatPromptTemplate
 
 class QueryRewriter:
-    def __init__(self, llm_api_key: str, llm_base_url: str, llm_model: str):
+    def __init__(
+        self,
+        llm_api_key: str,
+        llm_base_url: str,
+        llm_model: str,
+        request_timeout_seconds: int = 60,
+    ):
         self.llm = ChatOpenAI(
             api_key=llm_api_key,
             base_url=llm_base_url,
             model=llm_model,
-            temperature=0.0  # Force exact reasoning execution
+            temperature=0.0,  # Force exact reasoning execution
+            timeout=request_timeout_seconds,
+            max_retries=1,
         )
         
         self.prompt = ChatPromptTemplate.from_messages([

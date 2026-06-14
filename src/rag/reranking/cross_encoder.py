@@ -1,4 +1,4 @@
-from fastembed.rerank.cross_encoder import TextCrossEncoder
+from src.rag.models.fastembed_cache import get_cross_encoder
 
 
 def _coerce_score(value) -> float:
@@ -17,8 +17,8 @@ def _coerce_score(value) -> float:
 class LocalCrossEncoder:
     """Local CPU reranker backed by fastembed."""
 
-    def __init__(self, model_name: str = "BAAI/bge-reranker-base"):
-        self.model = TextCrossEncoder(model_name=model_name)
+    def __init__(self, model_name: str = "BAAI/bge-reranker-base", cache_dir: str | None = None):
+        self.model = get_cross_encoder(model_name, cache_dir)
 
     def compute_scores(self, query: str, documents: list[str]) -> list[float]:
         if not documents:

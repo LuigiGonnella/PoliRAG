@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
@@ -24,6 +25,7 @@ class RAGService:
         self._agent = None
         self._course_catalog: CourseCatalogService | None = None
         self._payload_indexes_ready = False
+        self._chat_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="polyrag-chat")
 
     @property
     def qdrant_client(self) -> QdrantClient:
@@ -52,6 +54,12 @@ class RAGService:
 
             if self.settings.hf_api_token:
                 os.environ.setdefault("HF_TOKEN", self.settings.hf_api_token)
+            if self.settings.tavily_api_key:
+                os.environ.setdefault("TAVILY_API_KEY", self.settings.tavily_api_key)
+            os.environ.setdefault(
+                "POLYRAG_WEB_SEARCH_TIMEOUT_SECONDS",
+                str(self.settings.web_search_timeout_seconds),
+            )
 
             self.ensure_payload_indexes()
 
@@ -68,6 +76,9 @@ class RAGService:
                 hf_token=self.settings.hf_api_token,
                 llm_config=llm_config,
                 hf_embedding_model=self.settings.hf_embedding_model,
+                fastembed_cache_dir=str(self.settings.fastembed_cache_dir),
+                llm_request_timeout_seconds=self.settings.llm_request_timeout_seconds,
+                web_search_timeout_seconds=self.settings.web_search_timeout_seconds,
                 enable_web_fallback=self.settings.enable_web_fallback,
                 enable_python_tool=self.settings.enable_python_tool,
                 retrieval_top_k=self.settings.retrieval_top_k,
@@ -202,7 +213,26 @@ class RAGService:
 
     def stream_chat_events(self, payload: AgentChatPayload):
         yield {"event": "status", "message": "Retrieving sources"}
-        response = self.chat(payload)
+        started_at = time.monotonic()
+        future = self._chat_executor.submit(self.chat, payload)
+        while True:
+            try:
+                response = future.result(timeout=5)
+                break
+            except TimeoutError:
+                elapsed = time.monotonic() - started_at
+                if elapsed >= self.settings.agent_response_timeout_seconds:
+                    future.cancel()
+                    yield {
+                        "event": "error",
+                        "message": (
+                            "The answer timed out while waiting for the RAG pipeline or Tavily web search. "
+                            "Try again with a narrower question, or increase AGENT_RESPONSE_TIMEOUT_SECONDS."
+                        ),
+                    }
+                    return
+                yield {"event": "status", "message": "Still working on the answer"}
+
         yield {
             "event": "metadata",
             "thread_id": response["thread_id"],

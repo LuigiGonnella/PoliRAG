@@ -11,3 +11,5 @@ data/app_sessions.sqlite
 models
 docker/qdrant_storage
 node_modules
+frontend/node_modules
+frontend/dist

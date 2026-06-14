@@ -3,68 +3,11 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
     <title>Polyhedric</title>
-    <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
-    <div class="app-shell">
-      <aside class="sidebar">
-        <div class="brand">
-          <div class="brand-mark">P</div>
-          <div>
-            <h1>Polyhedric</h1>
-            <p>University knowledge assistant</p>
-          </div>
-        </div>
-
-        <div class="session-actions">
-          <button id="new-general" class="button primary" type="button">+ General</button>
-          <button id="new-course" class="button secondary" type="button">+ Course</button>
-        </div>
-
-        <div class="session-list-header">
-          <span>Chats</span>
-          <span id="session-count">0</span>
-        </div>
-        <div id="session-list" class="session-list" aria-live="polite"></div>
-
-        <img class="sidebar-asset" src="/assets/polirag-panel.svg" alt="Structured university document map" />
-      </aside>
-
-      <main class="workspace">
-        <header class="topbar">
-          <div class="context-block">
-            <div class="eyebrow">Scope</div>
-            <div id="active-scope" class="scope-title">General knowledge base</div>
-          </div>
-
-          <div class="selectors" aria-label="Course context">
-            <label>
-              <span>Year</span>
-              <select id="year-select"></select>
-            </label>
-            <label>
-              <span>Course</span>
-              <select id="course-select"></select>
-            </label>
-          </div>
-        </header>
-
-        <section class="chat-surface" aria-label="Chat">
-          <div id="empty-state" class="empty-state">
-            <div class="empty-title">Ready</div>
-            <div class="empty-line"></div>
-          </div>
-          <div id="messages" class="messages" aria-live="polite"></div>
-        </section>
-
-        <form id="chat-form" class="composer">
-          <textarea id="message-input" rows="1" placeholder="Ask about exams, definitions, proofs, labs, slides, or notes"></textarea>
-          <button id="send-button" class="send-button" type="submit">Send</button>
-        </form>
-      </main>
-    </div>
-
-    <script src="/app.js" type="module"></script>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

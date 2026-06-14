@@ -4,8 +4,8 @@ from src.rag.reranking.cross_encoder import LocalCrossEncoder
 class RerankerPipeline:
     """Rerank retrieved chunks and attach rerank scores to each returned point."""
 
-    def __init__(self):
-        self.reranker = LocalCrossEncoder()
+    def __init__(self, cache_dir: str | None = None):
+        self.reranker = LocalCrossEncoder(cache_dir=cache_dir)
 
     def run(self, query: str, candidates: list, top_l: int = 10) -> list:
         if not candidates:

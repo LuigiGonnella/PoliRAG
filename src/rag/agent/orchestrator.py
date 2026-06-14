@@ -57,6 +57,9 @@ class PolyRAGAgent:
         llm_config,
         *,
         hf_embedding_model: str = "BAAI/bge-small-en-v1.5",
+        fastembed_cache_dir: str | None = None,
+        llm_request_timeout_seconds: int = 60,
+        web_search_timeout_seconds: int = 12,
         enable_web_fallback: bool = True,
         enable_python_tool: bool = False,
         retrieval_top_k: int = 25,
@@ -70,22 +73,35 @@ class PolyRAGAgent:
         self.retrieval_top_k = retrieval_top_k
         self.rerank_top_l = rerank_top_l
         self.fallback_threshold = fallback_threshold
+        self.llm_request_timeout_seconds = llm_request_timeout_seconds
 
-        self.rewriter = QueryRewriter(api_key, self.llm_config.base_url, self.llm_config.model)
+        self.rewriter = QueryRewriter(
+            api_key,
+            self.llm_config.base_url,
+            self.llm_config.model,
+            request_timeout_seconds=llm_request_timeout_seconds,
+        )
         self.retrieval_pipe = RetrievalPipeline(
             qdrant_client,
             collection_name,
             hf_token,
             hf_embedding_model=hf_embedding_model,
+            fastembed_cache_dir=fastembed_cache_dir,
         )
-        self.reranker_pipe = RerankerPipeline()
+        self.reranker_pipe = RerankerPipeline(cache_dir=fastembed_cache_dir)
 
         self.llm = ChatOpenAI(
             api_key=api_key,
             base_url=self.llm_config.base_url,
             model=self.llm_config.model,
             temperature=0.1,
+            timeout=llm_request_timeout_seconds,
+            max_retries=1,
         )
+
+        import os
+
+        os.environ.setdefault("POLYRAG_WEB_SEARCH_TIMEOUT_SECONDS", str(web_search_timeout_seconds))
 
         self.gemini_client = None
         if genai is not None:

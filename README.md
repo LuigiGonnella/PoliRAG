@@ -2,7 +2,7 @@
 
 PoliRAG is a RAG agent microservice and web UI for querying university notes, slides, PDFs, notebooks, reports, and other study material stored in Qdrant.
 
-The current API serves a static frontend, manages anonymous chat sessions, stores visible chat history in SQLite, retrieves local context from Qdrant, reranks results, and routes the conversation through a LangGraph agent.
+The current API serves a Vite-built React frontend, manages anonymous chat sessions, stores visible chat history in SQLite, retrieves local context from Qdrant, reranks results, and routes the conversation through a LangGraph agent.
 
 ## Architecture
 
@@ -98,13 +98,36 @@ python -m venv .venv
 .\.venv\Scripts\python -m pip install -r requirements-api.txt
 ```
 
-Start the backend and frontend together:
+Start the backend:
 
 ```powershell
 .\.venv\Scripts\python -m uvicorn src.app.app:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-Open:
+In another terminal, start the React frontend:
+
+```powershell
+cd frontend
+npm install
+npm run dev
+```
+
+Open the Vite app during development:
+
+```text
+http://localhost:5173
+```
+
+The backend serves the compiled frontend from `frontend/dist` at `http://localhost:8000` after `npm run build`, or automatically when running Docker.
+
+Build the frontend locally:
+
+```powershell
+cd frontend
+npm run build
+```
+
+Production/Docker URL:
 
 ```text
 http://localhost:8000

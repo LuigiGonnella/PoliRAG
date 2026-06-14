@@ -1,7 +1,8 @@
 import os
 
-from fastembed import SparseTextEmbedding, TextEmbedding
 from qdrant_client import QdrantClient, models
+
+from src.rag.models.fastembed_cache import get_sparse_embedding, get_text_embedding
 
 
 class HybridRetriever:
@@ -13,14 +14,15 @@ class HybridRetriever:
         collection_name: str,
         hf_token: str | None,
         hf_embedding_model: str = "BAAI/bge-small-en-v1.5",
+        cache_dir: str | None = None,
     ):
         self.client = client
         self.collection_name = collection_name
         self.hf_token = hf_token
         if hf_token:
             os.environ.setdefault("HF_TOKEN", hf_token)
-        self.dense_model = TextEmbedding(model_name=hf_embedding_model)
-        self.sparse_model = SparseTextEmbedding(model_name="Qdrant/bm25")
+        self.dense_model = get_text_embedding(hf_embedding_model, cache_dir)
+        self.sparse_model = get_sparse_embedding("Qdrant/bm25", cache_dir)
 
     def _get_dense_embedding(self, text: str) -> list:
         embedding = next(iter(self.dense_model.embed([text])))

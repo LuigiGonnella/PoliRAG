@@ -10,8 +10,15 @@ class RetrievalPipeline:
         collection_name: str,
         hf_token: str | None,
         hf_embedding_model: str = "BAAI/bge-small-en-v1.5",
+        fastembed_cache_dir: str | None = None,
     ):
-        self.retriever = HybridRetriever(client, collection_name, hf_token, hf_embedding_model)
+        self.retriever = HybridRetriever(
+            client,
+            collection_name,
+            hf_token,
+            hf_embedding_model,
+            cache_dir=fastembed_cache_dir,
+        )
 
     def run(
         self,

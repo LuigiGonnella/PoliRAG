@@ -1,3 +1,14 @@
+FROM node:22-slim AS frontend-builder
+
+WORKDIR /app/frontend
+
+COPY frontend/package.json frontend/package-lock.json frontend/vite.config.js frontend/index.html ./
+COPY frontend/public ./public
+COPY frontend/src ./src
+
+RUN npm ci --no-audit --no-fund
+RUN npm run build
+
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1
@@ -14,7 +25,7 @@ RUN pip install --no-cache-dir -r requirements-api.txt
 
 COPY src ./src
 COPY utils ./utils
-COPY frontend ./frontend
+COPY --from=frontend-builder /app/frontend/dist ./frontend
 COPY README.md .
 
 RUN mkdir -p /app/data
